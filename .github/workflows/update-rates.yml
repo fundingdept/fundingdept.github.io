@@ -1,0 +1,92 @@
+name: Update rates
+
+on:
+  schedule:
+    # Weekdays 2:30 PM and 4:30 PM Pacific (21:30 / 23:30 UTC), plus 7:00 AM Pacific daily (14:00 UTC)
+    - cron: "30 21 * * 1-5"
+    - cron: "30 23 * * 1-5"
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      fha:
+        description: "30-yr FHA rate, e.g. 7.15 (leave blank to read Mortgage News Daily)"
+        required: false
+      va:
+        description: "30-yr VA rate, e.g. 7.17"
+        required: false
+      asOf:
+        description: "As-of date YYYY-MM-DD"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read rates and update rates.json
+        env:
+          IN_FHA: ${{ github.event.inputs.fha }}
+          IN_VA: ${{ github.event.inputs.va }}
+          IN_ASOF: ${{ github.event.inputs.asOf }}
+        run: |
+          python3 - <<'PY'
+          import json, re, os, sys, html, datetime, urllib.request
+          from zoneinfo import ZoneInfo
+
+          path = "rates.json"
+          cur = json.load(open(path))
+          now = datetime.datetime.now(ZoneInfo("America/Los_Angeles"))
+
+          fha = os.environ.get("IN_FHA", "").strip()
+          va = os.environ.get("IN_VA", "").strip()
+          asof = os.environ.get("IN_ASOF", "").strip()
+          source = "Manual entry via GitHub Actions"
+
+          if not (fha and va):
+              req = urllib.request.Request(
+                  "https://www.mortgagenewsdaily.com/mortgage-rates",
+                  headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"})
+              page = urllib.request.urlopen(req, timeout=30).read().decode("utf-8", "ignore")
+              text = html.unescape(re.sub(r"<[^>]+>", " ", page))
+              text = re.sub(r"\s+", " ", text)
+              mf = re.search(r"30 Yr\.? FHA\s*([0-9]\.[0-9]{2})\s*%", text)
+              mv = re.search(r"30 Yr\.? VA\s*([0-9]\.[0-9]{2})\s*%", text)
+              if not (mf and mv):
+                  print("Could not find FHA/VA rows on the MND page; leaving rates.json unchanged."); sys.exit(0)
+              fha, va = mf.group(1), mv.group(1)
+              source = "Mortgage News Daily daily rate index (30 Yr. FHA / 30 Yr. VA)"
+              md = re.search(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", text[max(0, mf.start()-600):mf.start()])
+              if md and not asof:
+                  m, d, y = (int(x) for x in md.groups()); y = y + 2000 if y < 100 else y
+                  asof = f"{y:04d}-{m:02d}-{d:02d}"
+
+          if not asof:
+              d = now.date()
+              while d.weekday() > 4: d -= datetime.timedelta(days=1)
+              asof = d.isoformat()
+
+          fha, va = round(float(fha), 2), round(float(va), 2)
+          for name, v, old in (("FHA", fha, float(cur.get("fha", v))), ("VA", va, float(cur.get("va", v)))):
+              if not (4.0 <= v <= 10.0) or abs(v - old) > 0.5:
+                  print(f"{name} rate {v} failed the sanity check (previous {old}); leaving rates.json unchanged."); sys.exit(0)
+
+          new = {"fha": fha, "va": va, "asOf": asof, "fhaOverride": cur.get("fhaOverride"),
+                 "source": source, "updatedAt": now.isoformat(timespec="seconds")}
+          if (new["fha"], new["va"], new["asOf"]) == (cur.get("fha"), cur.get("va"), cur.get("asOf")):
+              print("Rates unchanged; nothing to commit."); sys.exit(0)
+          json.dump(new, open(path, "w"), indent=2); open(path, "a").write("\n")
+          print("Updated:", new)
+          PY
+
+      - name: Commit and push
+        run: |
+          if git diff --quiet -- rates.json; then echo "No change"; exit 0; fi
+          git config user.name "Funding Dept"
+          git config user.email "dhc@mpirefi.com"
+          git add rates.json
+          git commit -m "Rates for $(python3 -c 'import json;print(json.load(open("rates.json"))["asOf"])')"
+          git push
