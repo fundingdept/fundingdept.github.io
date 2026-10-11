@@ -171,9 +171,12 @@ const CONFIG = {
   // Every finished quiz (contact info, answers, estimate, requested call time) is emailed here.
   // The first submission sends a one-time activation email from FormSubmit; click it once.
   leadEmail: "dhc@mpirefi.com",
-  baseRate: 7.17,         // today's 30-yr FHA rate (Mortgage News Daily index); quotes for everyone who isn't VA
-  vaRate: 7.18,           // today's 30-yr VA rate (Mortgage News Daily index); quotes for military/VA-eligible
-  rateDate: "2026-10-08", // date baseRate was last updated
+  // Rates: the live values come from rates.json next to this page (updated daily by a scheduled task).
+  // The three values below are only the fallback if that file can't be loaded.
+  ratesUrl: "rates.json",
+  baseRate: 7.15,         // fallback 30-yr FHA rate (quotes for everyone who isn't VA)
+  vaRate: 7.17,           // fallback 30-yr VA rate (quotes for military/VA-eligible)
+  rateDate: "2026-10-09", // as-of date of the fallback rates
   limitsYear: 2026,       // year of the California county conforming loan limits below (FHFA updates every January)
   taxInsRate: 0.0145,     // property tax + homeowners insurance, % of price per year
   closingRate: 0.03,      // closing-cost reserve, % of price
@@ -516,4 +519,17 @@ function sendLead(){
 }
 
 render();
+
+// Load today's rates from rates.json (same folder). Falls back to the CONFIG values above if unavailable.
+(async function loadRates(){
+  try {
+    const res = await fetch(CONFIG.ratesUrl + "?t=" + Date.now(), {cache: "no-store"});
+    if (!res.ok) return;
+    const j = await res.json();
+    const fha = (j.fhaOverride != null) ? Number(j.fhaOverride) : Number(j.fha);
+    const va = Number(j.va);
+    const okDate = /^\d{4}-\d{2}-\d{2}$/.test(String(j.asOf||""));
+    if (fha > 3 && fha < 12 && va > 3 && va < 12 && okDate){ CONFIG.baseRate = fha; CONFIG.vaRate = va; CONFIG.rateDate = j.asOf; }
+  } catch (e) { /* keep fallback rates */ }
+})();
 </script>
