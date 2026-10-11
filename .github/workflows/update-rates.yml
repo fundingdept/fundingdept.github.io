@@ -34,14 +34,21 @@ jobs:
           IN_ASOF: ${{ github.event.inputs.asOf }}
         run: |
           python3 - <<'PY'
-          import json, re, os, sys, html, datetime, urllib.request
-          from zoneinfo import ZoneInfo
+          import json, re, os, sys, html, datetime, urllib.request, traceback
 
           def fail(msg):
               print("::error::" + msg); sys.exit(0)
+          def _hook(t, v, tb):
+              print("::error::Unexpected error: " + "".join(traceback.format_exception(t, v, tb)).replace("\n", " | ")); sys.exit(0)
+          sys.excepthook = _hook
+          try:
+              from zoneinfo import ZoneInfo
+              LA = ZoneInfo("America/Los_Angeles")
+          except Exception:
+              LA = datetime.timezone(datetime.timedelta(hours=-7))
           path = "rates.json"
           cur = json.load(open(path))
-          now = datetime.datetime.now(ZoneInfo("America/Los_Angeles"))
+          now = datetime.datetime.now(LA)
 
           fha = os.environ.get("IN_FHA", "").strip()
           va = os.environ.get("IN_VA", "").strip()
