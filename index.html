@@ -181,8 +181,25 @@ const CONFIG = {
   taxInsRate: 0.0145,     // property tax + homeowners insurance, % of price per year
   closingRate: 0.03,      // closing-cost reserve, % of price
   phone: "(805) 722-9638",
-  email: "dhc@mpirefi.com"
+  email: "dhc@mpirefi.com",
+  gaMeasurementId: ""     // Google Analytics 4 Measurement ID, e.g. "G-XXXXXXXXXX". Leave "" for no tracking.
 };
+
+/* ===== Visit & completion tracking (Google Analytics 4) =====
+   Counts page visits automatically, plus these events: quiz_start (first question shown),
+   quiz_step (each question shown, with step_name), quiz_complete (results shown; has program and call_requested).
+   Does nothing until gaMeasurementId is set. */
+const _tracked = new Set();
+function track(name, params){ try { if (CONFIG.gaMeasurementId && window.gtag) gtag("event", name, params || {}); } catch(e){} }
+(function(){
+  const id = CONFIG.gaMeasurementId; if (!id) return;
+  window.dataLayer = window.dataLayer || [];
+  window.gtag = function(){ dataLayer.push(arguments); };
+  gtag("js", new Date()); gtag("config", id);
+  const el = document.createElement("script"); el.async = true;
+  el.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(id);
+  document.head.appendChild(el);
+})();
 
 const credit = {
   "760":{label:"760+",add:0,score:780},
@@ -232,6 +249,11 @@ const num = s => Number(String(s).replace(/[^0-9.]/g,"")) || 0;
 
 function render(){
   const s = steps[i];
+  if (s.id !== "intro" && s.id !== "results" && !_tracked.has(s.id)){
+    _tracked.add(s.id);
+    if (i === 1) track("quiz_start");
+    track("quiz_step", {step_name: s.id, step_number: i});
+  }
   card.className = "card step-" + s.id;
   document.querySelector(".wrap").classList.toggle("wide", s.id==="intro" || s.id==="results");
   const qCount = steps.length - 2;
@@ -490,6 +512,7 @@ function prettyDate(iso){ const [y,m,d]=String(iso).split("-").map(Number); retu
 function sendLead(){
   if (!CONFIG.leadEmail || A._sent) return;
   A._sent = true;
+  track("quiz_complete", {program: A.estimate.program, call_requested: !!A.wantsCall, county: A.county});
   const pays = {w2:"W-2 salary/hourly",self:"Self-employed/1099",commission:"Commission/bonus",retired:"Retired/fixed income",other:"Other"};
   const hist = {first:"First-time buyer",owned:"Owned before, not now",own:"Owns a home now"};
   const lead = {
