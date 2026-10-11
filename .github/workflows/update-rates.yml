@@ -37,6 +37,8 @@ jobs:
           import json, re, os, sys, html, datetime, urllib.request
           from zoneinfo import ZoneInfo
 
+          def fail(msg):
+              print("::error::" + msg); sys.exit(0)
           path = "rates.json"
           cur = json.load(open(path))
           now = datetime.datetime.now(ZoneInfo("America/Los_Angeles"))
@@ -50,13 +52,16 @@ jobs:
               req = urllib.request.Request(
                   "https://www.mortgagenewsdaily.com/mortgage-rates",
                   headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"})
-              page = urllib.request.urlopen(req, timeout=30).read().decode("utf-8", "ignore")
+              try:
+                  page = urllib.request.urlopen(req, timeout=30).read().decode("utf-8", "ignore")
+              except Exception as e:
+                  print(f"::error::Could not load Mortgage News Daily: {e!r}"); sys.exit(0)
               text = html.unescape(re.sub(r"<[^>]+>", " ", page))
               text = re.sub(r"\s+", " ", text)
               mf = re.search(r"30 Yr\.? FHA\s*([0-9]\.[0-9]{2})\s*%", text)
               mv = re.search(r"30 Yr\.? VA\s*([0-9]\.[0-9]{2})\s*%", text)
               if not (mf and mv):
-                  print("Could not find FHA/VA rows on the MND page; leaving rates.json unchanged."); sys.exit(0)
+                  fail("Could not find the 30 Yr. FHA / 30 Yr. VA rows on the MND page; rates.json left unchanged. Snippet: " + text[:300])
               fha, va = mf.group(1), mv.group(1)
               source = "Mortgage News Daily daily rate index (30 Yr. FHA / 30 Yr. VA)"
               md = re.search(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", text[max(0, mf.start()-600):mf.start()])
@@ -72,7 +77,7 @@ jobs:
           fha, va = round(float(fha), 2), round(float(va), 2)
           for name, v, old in (("FHA", fha, float(cur.get("fha", v))), ("VA", va, float(cur.get("va", v)))):
               if not (4.0 <= v <= 10.0) or abs(v - old) > 0.5:
-                  print(f"{name} rate {v} failed the sanity check (previous {old}); leaving rates.json unchanged."); sys.exit(0)
+                  fail(f"{name} rate {v} failed the sanity check (previous {old}); rates.json left unchanged.")
 
           new = {"fha": fha, "va": va, "asOf": asof, "fhaOverride": cur.get("fhaOverride"),
                  "source": source, "updatedAt": now.isoformat(timespec="seconds")}
