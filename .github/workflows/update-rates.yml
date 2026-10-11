@@ -82,7 +82,7 @@ jobs:
               asof = d.isoformat()
 
           fha, va = round(float(fha), 2), round(float(va), 2)
-          for name, v, old in (("FHA", fha, float(cur.get("fha", v))), ("VA", va, float(cur.get("va", v)))):
+          for name, v, old in (("FHA", fha, float(cur.get("fha", fha))), ("VA", va, float(cur.get("va", va)))):
               if not (4.0 <= v <= 10.0) or abs(v - old) > 0.5:
                   fail(f"{name} rate {v} failed the sanity check (previous {old}); rates.json left unchanged.")
 
