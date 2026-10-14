@@ -543,9 +543,18 @@ function sendLead(){
     "Estimate": A.estimate.high ? `${A.estimate.low===A.estimate.high ? "Up to " + fmt(A.estimate.high) : fmt(A.estimate.low) + " to " + fmt(A.estimate.high)}, ${A.estimate.program} at ${A.estimate.ratePct}%${A.estimate.cappedAtLimit ? " (capped at county limit; income supports up to " + fmt(A.estimate.uncappedHigh) + ")" : ""}` : "No range yet",
     "lead_json": JSON.stringify(lead)
   };
-  try {
-    fetch("https://formsubmit.co/ajax/" + encodeURIComponent(CONFIG.leadEmail), {method:"POST", headers:{"Content-Type":"application/json", "Accept":"application/json"}, body: JSON.stringify(body)}).catch(()=>{});
-  } catch(e){}
+  // Send with up to 3 attempts so a brief hiccup at the form service can't drop a lead.
+  const url = "https://formsubmit.co/ajax/" + encodeURIComponent(CONFIG.leadEmail);
+  const payload = JSON.stringify(body);
+  (async () => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json", "Accept":"application/json"}, body: payload, keepalive: true});
+        if (res.ok) { A._delivered = true; return; }
+      } catch(e) {}
+      await new Promise(r => setTimeout(r, 1500 * attempt));
+    }
+  })();
 }
 
 render();
