@@ -128,6 +128,8 @@ input[type=text],input[type=email],input[type=tel],input[type=date],select{font:
 .keys-photo{border-radius:12px;overflow:hidden;position:relative;margin:0}
 .keys-photo img{display:block;width:100%;height:auto;aspect-ratio:1;object-fit:cover;max-height:300px}
 .keys-photo figcaption{position:absolute;inset:auto 0 0 0;padding:28px 16px 14px;background:linear-gradient(transparent,rgba(22,23,26,.85));color:var(--brand-ink);font:800 19px var(--display)}
+.deliver-warn{background:var(--soft-2);border:1px solid var(--accent);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.deliver-warn .btn.primary{min-width:140px}
 .cta{background:var(--brand-bg);color:var(--brand-ink);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;border-top:3px solid var(--brand-gold)}
 .cta b{font-family:var(--display);font-size:15px}
 .cta .hint{color:var(--brand-muted)}
@@ -543,21 +545,57 @@ function sendLead(){
     "Estimate": A.estimate.high ? `${A.estimate.low===A.estimate.high ? "Up to " + fmt(A.estimate.high) : fmt(A.estimate.low) + " to " + fmt(A.estimate.high)}, ${A.estimate.program} at ${A.estimate.ratePct}%${A.estimate.cappedAtLimit ? " (capped at county limit; income supports up to " + fmt(A.estimate.uncappedHigh) + ")" : ""}` : "No range yet",
     "lead_json": JSON.stringify(lead)
   };
-  // Send with up to 3 attempts so a brief hiccup at the form service can't drop a lead.
-  const url = "https://formsubmit.co/ajax/" + encodeURIComponent(CONFIG.leadEmail);
   const payload = JSON.stringify(body);
+  const qid = "hrc_" + Date.now();
+  queuePut(qid, payload);                      // kept locally until delivery is confirmed
+  A._fallback = {name: A.name, phone: A.phone, email: A.email, est: body["Estimate"], call: body["Requested call"], county: A.county};
   (async () => {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const res = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json", "Accept":"application/json"}, body: payload, keepalive: true});
-        if (res.ok) { A._delivered = true; return; }
-      } catch(e) {}
-      await new Promise(r => setTimeout(r, 1500 * attempt));
-    }
+    const ok = await deliver(payload, 3);
+    if (ok) { A._delivered = true; queueDel(qid); }
+    else showDeliveryFallback();
   })();
 }
 
+/* ===== Delivery helpers: retries, a local queue that resends on later visits, and a visible fallback ===== */
+const LEAD_URL = "https://formsubmit.co/ajax/" + encodeURIComponent(CONFIG.leadEmail);
+async function deliver(payload, attempts){
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetch(LEAD_URL, {method:"POST", headers:{"Content-Type":"application/json", "Accept":"application/json"}, body: payload, keepalive: true});
+      if (res.ok) return true;
+    } catch(e) {}
+    if (attempt < attempts) await new Promise(r => setTimeout(r, 1500 * attempt));
+  }
+  return false;
+}
+function queuePut(id, payload){ try { localStorage.setItem(id, payload); } catch(e){} }
+function queueDel(id){ try { localStorage.removeItem(id); } catch(e){} }
+async function resendQueued(){
+  let keys = [];
+  try { keys = Object.keys(localStorage).filter(k => k.startsWith("hrc_")); } catch(e){ return; }
+  for (const k of keys) {
+    let payload = null; try { payload = localStorage.getItem(k); } catch(e){}
+    if (!payload) { queueDel(k); continue; }
+    const age = Date.now() - Number(k.slice(4));
+    if (age > 14*24*3600*1000) { queueDel(k); continue; }   // give up after two weeks
+    if (await deliver(payload, 2)) queueDel(k);
+  }
+}
+function showDeliveryFallback(){
+  const cta = document.querySelector(".cta"); if (!cta || !A._fallback) return;
+  const f = A._fallback;
+  const msg = `Hi Daniel, I just finished the Home Ready Check. ${f.name}, ${f.phone}, ${f.email}. ${f.county} County. Estimate: ${f.est}. Call: ${f.call}.`;
+  const sms = "sms:+1" + CONFIG.phone.replace(/\D/g,"") + "?&body=" + encodeURIComponent(msg);
+  const mail = "mailto:" + CONFIG.email + "?subject=" + encodeURIComponent("Home Ready Check: " + f.name) + "&body=" + encodeURIComponent(msg);
+  const box = document.createElement("div");
+  box.className = "deliver-warn";
+  box.innerHTML = `<b>One more tap to make sure Daniel gets your results.</b><p class="hint">Our form service didn't confirm your submission, so send it directly. Your message is already written; just hit send.</p>
+    <div class="row"><a class="btn primary" href="${sms}">Text my results to Daniel</a><a class="btn primary" href="${mail}">Email instead</a></div>`;
+  cta.parentNode.insertBefore(box, cta);
+}
+
 render();
+resendQueued();
 
 // Load today's rates from rates.json (same folder). Falls back to the CONFIG values above if unavailable.
 (async function loadRates(){

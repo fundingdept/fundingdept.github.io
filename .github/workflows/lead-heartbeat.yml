@@ -1,0 +1,38 @@
+name: Lead delivery heartbeat
+
+on:
+  schedule:
+    - cron: "35 13 * * *"   # 6:35 AM Pacific daily (13:35 UTC)
+  workflow_dispatch:
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send a test lead through FormSubmit
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, datetime, sys
+          try:
+              from zoneinfo import ZoneInfo
+              now = datetime.datetime.now(ZoneInfo("America/Los_Angeles"))
+          except Exception:
+              now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-7)))
+          stamp = now.strftime("%Y-%m-%d %H:%M %Z")
+          lead = {"heartbeat": True, "submittedAt": now.isoformat(timespec="seconds"), "source": "Home Ready Check heartbeat",
+                  "fullName": "Heartbeat Test", "phone": "(000) 000-0000", "email": "heartbeat@fundingdept.github.io"}
+          body = {"_subject": f"Home Ready Check heartbeat: {stamp}", "_template": "table", "_captcha": "false",
+                  "Name": "Heartbeat Test", "Phone": "(000) 000-0000", "Email": "heartbeat@fundingdept.github.io",
+                  "Note": "Automatic daily test of the quiz lead delivery path. Not a real lead.",
+                  "lead_json": json.dumps(lead)}
+          req = urllib.request.Request("https://formsubmit.co/ajax/dhc@mpirefi.com", data=json.dumps(body).encode(),
+                                       headers={"Content-Type": "application/json", "Accept": "application/json",
+                                                "User-Agent": "Mozilla/5.0 (fundingdept heartbeat)"})
+          try:
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  text = r.read().decode()
+                  print("FormSubmit response:", r.status, text[:200])
+                  if r.status != 200: sys.exit(1)
+          except Exception as e:
+              print("::error::Heartbeat submission failed: " + repr(e)); sys.exit(1)
+          PY
