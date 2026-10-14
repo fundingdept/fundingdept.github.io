@@ -27,11 +27,12 @@ jobs:
                   "lead_json": json.dumps(lead)}
           req = urllib.request.Request("https://formsubmit.co/ajax/dhc@mpirefi.com", data=json.dumps(body).encode(),
                                        headers={"Content-Type": "application/json", "Accept": "application/json",
-                                                "User-Agent": "Mozilla/5.0 (fundingdept heartbeat)"})
+                                                "User-Agent": "Mozilla/5.0 (fundingdept heartbeat)",
+                                                "Origin": "https://fundingdept.github.io", "Referer": "https://fundingdept.github.io/"})
           try:
               with urllib.request.urlopen(req, timeout=30) as r:
                   text = r.read().decode()
-                  print("FormSubmit response:", r.status, text[:200])
+                  print("::notice::FormSubmit response " + str(r.status) + ": " + text[:300].replace("\n"," "))
                   if r.status != 200: sys.exit(1)
           except Exception as e:
               print("::error::Heartbeat submission failed: " + repr(e)); sys.exit(1)
