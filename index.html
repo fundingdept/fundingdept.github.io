@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Home Ready Check</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap">
@@ -295,7 +296,7 @@ function intro(){
       <li>Reviewed by a licensed loan officer, not a robot</li>
     </ul>
     <button class="btn primary" id="go" type="button">Start my check</button>`;
-  document.getElementById("go").onclick = ()=>{ i++; render(); };
+  document.getElementById("go").onclick = ()=>{ sendStartPing(); i++; render(); };
 }
 function choiceStep(s, meta){
   card.innerHTML = `${meta}<h2>${s.q}</h2>${s.hint?`<p class="hint">${s.hint}</p>`:""}
@@ -527,7 +528,7 @@ function sendLead(){
   const lead = {
     submittedAt: new Date().toISOString(), source: "Approval quiz",
     fullName: A.name, email: A.email, phone: A.phone, contactConsent: A.consent,
-    callRequested: !!A.wantsCall, callDate: A.callDate, callTime: A.callTime,
+    callRequested: !!A.wantsCall, callDate: A.callDate, callTime: A.callTime, trafficSource: trafficSource(), device: deviceLabel(),
     occupation: A.job, payType: pays[A.payType], annualIncome: A.income, monthlyDebts: A.debts,
     creditEstimate: credit[A.credit].label, savings: A.savings, homeHistory: hist[A.history],
     military: A.vet, zip: A.zip, county: A.county, countyLimit: A.limit, estimate: A.estimate
@@ -541,6 +542,7 @@ function sendLead(){
     "Work": `${A.job} (${pays[A.payType]})`, "Annual income": fmt(A.income), "Monthly debts": fmt(A.debts),
     "Credit estimate": credit[A.credit].label, "Savings": fmt(A.savings), "Home history": hist[A.history],
     "Military": A.vet === "yes" ? "Yes" : "No",
+    "Came from": `${trafficSource()} · ${deviceLabel()}`,
     "ZIP / County": `${A.zip} · ${A.county} County (${CONFIG.limitsYear} limit ${fmt(A.limit)})`,
     "Estimate": A.estimate.high ? `${A.estimate.low===A.estimate.high ? "Up to " + fmt(A.estimate.high) : fmt(A.estimate.low) + " to " + fmt(A.estimate.high)}, ${A.estimate.program} at ${A.estimate.ratePct}%${A.estimate.cappedAtLimit ? " (capped at county limit; income supports up to " + fmt(A.estimate.uncappedHigh) + ")" : ""}` : "No range yet",
     "lead_json": JSON.stringify(lead)
@@ -554,6 +556,39 @@ function sendLead(){
     if (ok) { A._delivered = true; queueDel(qid); }
     else showDeliveryFallback();
   })();
+}
+
+/* ===== Traffic source + "someone started" ping ===== */
+function trafficSource(){
+  try {
+    const q = new URLSearchParams(location.search);
+    const src = q.get("src") || q.get("utm_source") || q.get("ref");
+    if (src) return src.slice(0, 40);
+    if (document.referrer) { try { return "via " + new URL(document.referrer).hostname.replace(/^www\./,""); } catch(e){} }
+  } catch(e){}
+  return "direct";
+}
+function deviceLabel(){
+  const ua = navigator.userAgent || "";
+  if (/iPhone|iPad/.test(ua)) return "iPhone/iPad";
+  if (/Android/.test(ua)) return "Android";
+  if (/Macintosh/.test(ua)) return "Mac";
+  if (/Windows/.test(ua)) return "Windows PC";
+  return "other device";
+}
+function sendStartPing(){
+  // One ping per visitor per day, so refreshes and back-button taps don't repeat it.
+  const day = new Date().toLocaleDateString("en-CA", {timeZone:"America/Los_Angeles"});
+  try { if (localStorage.getItem("hrcStartDay") === day) return; localStorage.setItem("hrcStartDay", day); } catch(e){}
+  const when = new Date().toLocaleString("en-US", {timeZone:"America/Los_Angeles", weekday:"short", month:"short", day:"numeric", hour:"numeric", minute:"2-digit"});
+  const body = {
+    _subject: `Quiz started: ${when} · ${deviceLabel()} · ${trafficSource()}`,
+    _template: "table", _captcha: "false",
+    "What": "Someone just started the Home Ready Check", "When": when + " PT",
+    "Device": deviceLabel(), "Came from": trafficSource(),
+    "lead_json": JSON.stringify({quizStarted: true, startedAt: new Date().toISOString(), device: deviceLabel(), source: trafficSource()})
+  };
+  deliver(JSON.stringify(body), 2).catch(()=>{});
 }
 
 /* ===== Delivery helpers: retries, a local queue that resends on later visits, and a visible fallback ===== */
@@ -572,7 +607,7 @@ function queuePut(id, payload){ try { localStorage.setItem(id, payload); } catch
 function queueDel(id){ try { localStorage.removeItem(id); } catch(e){} }
 async function resendQueued(){
   let keys = [];
-  try { keys = Object.keys(localStorage).filter(k => k.startsWith("hrc_")); } catch(e){ return; }
+  try { keys = Object.keys(localStorage).filter(k => /^hrc_\d+$/.test(k)); } catch(e){ return; }
   for (const k of keys) {
     let payload = null; try { payload = localStorage.getItem(k); } catch(e){}
     if (!payload) { queueDel(k); continue; }
